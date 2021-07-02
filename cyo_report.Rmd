@@ -1,0 +1,474 @@
+---
+title: "Wave Height Forecasting"
+author: "Alberto Guijarro Rodriguez"
+date: "24/06/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+Wave height forecasting plays a crucial role on supporting a country coastal development. Being able to correctly define your coastal conditions allows to correctly define the design parameters to create coastal protection structures such as:
+- Ports & Harbours
+- Jetty walls
+- Breakwaters
+
+And even design some of the most complex and spectacular cities known to man, such as the Palm Jumeirah in Dubai.
+
+The dataset considered for this analysis contains ocean wave information about Valencia, a coastal city in the east of Spain. The Buoy is placed on the Mediterratenan Sea, and the data can be extracted from http://www.puertos.es/en-us/oceanografia/Pages/portus.aspx.
+
+On this project we will conduct an Exploratory Data Analysis (EDA) on the Coastal Data for the Valencia region and build a robust forecasting model on expected Significant ($H_s$) and Maximum ($H_p$) wave height, aiming to provide reliable forecasted values for the significant wave height.
+
+# Variables
+The full description on the features and parameters can be found in the attached file "OPPE_Description.pdf", but given this is supplied by the Public Gov Organism State Ports and it is only supplied in Spanish, we will provide the following variables description,
+
+## Variable sample times
+The values are aggregated on an hourly basis, however the buoy parameters they are not measured during the entire hour, for instance wind data is measured during a 10 minutes interval every hour, thus even though each hour has an average wind speed data point, this value has been calculated over a 10 minutes period.
+
+Table below details the mean duration for each one of the observed agents:
+
+Agent Observed   | Measure Duration|
+-----------------|-----------------|
+Waves            |30Min (Aprox)    |
+Wind Speed       |10 Min.|
+Current Speed    |10 Min.|
+Air Temperature  |Instantaneous|
+Air Preasure     |Instantaneous|
+Water Salinity   |Instantaneous|
+Water Temperature|Instantaneous|
+
+
+## Variables description
+
+- Date (GMT): Time Value was recorded at time zone GMT, Greenwich Mean Time
+- Source of data: there are three columns and they seem to represent a change in the device being used to record the data, there is no information in the official documentation, but if we build a time series plot we can see how on the 2020-11-25 at 22:00:00 all the sources share the same value 3, and also how the number of missing values on some fields increases when compared to the previous periods. 
+
+### Waves
+- Scalar parameters of zero cross and espectral.
+    - Significant Wave Height(m): the average wave height, from trough to crest, of the highest one-third of the waves. This is used to represent the wave height an trained observer will appreciate by simply looking where the wave is crossing (not from the coast).
+    - Mean Period Tm02(s): Mean period (as an inverse of the wave length) of the measured waves, usually referred to as $T_m$
+    - Peak Period(s): Period of the wave group with more energy, usually defined as $T_p$, when the more regular the waves are, the closer the $T_p$ is to the $T_m$, however $T_p$ is usually larger than $T_m$
+    - Maximum Waves Height(m): Max Wave Height measured
+    - Highest Wave Period(s): 
+- Directional parameters
+    - Waves coming-from Direc.(0=N,90=E)
+    - Wave coming-from direction(0=N,90=E)
+    - Mean comming-from Direc. at Waves Peak(grados): Direction of the waves with largest energy
+    
+### Meteorology
+Measured 3m over the water surface
+- Atmospheric Pressure(hpa)                     
+- Air Temperature(ºC)                             
+- Wind Speed(m/s)                                 
+- Wind coming-from Direction(0=N,90=E)  , mean direction of propagation
+
+### Oceanography 
+Measured 3m under the water surface
+- Sea Temperature(ºC)                             
+- Salinity(Practical Salinity Units, psu), salt concentration (Sodium and Chlorure) in sea water.                           
+- Currents Mean Speed(cm/s), mean speed of the water currents                      
+- Currents propag. Direction(0=N,90=E), mean direction of propagation
+
+## Valencia Buoy information
+- Longitude 0.20 E
+- Latitude 39.51 N
+- Data Sampling 60 Min
+- Code 2630
+- Mooring Depth 260m
+- First record date: 2005-09-15
+- Last record date: 2021-06-16
+- Type of sensor: Directional Met-Oce
+- Model: SeaWatch
+- Data set: REDEXT
+
+```{r load data, include=FALSE, echo=FALSE, results="hide"}
+
+library(tidyverse)
+library(caret)
+library(data.table)
+library(e1071)
+
+
+# Set random seed for results replicability
+set.seed(42, sample.kind="Rounding")
+
+
+# Load data
+df <- read.csv(file = './data.csv') %>% as_tibble()
+df<-df %>%  mutate(Date..GMT. = as.POSIXct(Date..GMT.,format="%Y-%m-%d %H:%M:%S")) 
+df<-df[order(df$Date..GMT.),]
+
+```
+
+```{r Summary Statistics}
+# Dimensions
+dim(df)
+# Structure
+str(df)
+# Summary
+print(summary(df))
+```
+
+
+# Missing Values
+Below we can see the % of null values present in our dataset
+- Air Temperature(ºC) has 60.02% of its values missing in the considered time period
+The Highest Wave records present the 55% of their records missing for the considered time period
+- Highest Wave Period(s)
+- Mean comming-from Direc. at Waves Peak(grados)
+- Maximum Waves Height(m) 
+
+The remaining variables presenting missing values have a ratio of under 1% meaning we could probably exclude them and still have a good enough sample size to model. For the other 4 variables presenting high levels of missing values we will study them independently and assess what is the best  or more reasonable missing values strategy.
+
+```{r null plot, echo=FALSE, fig.width=8, fig.height=6}
+par(mar=c(15,4,4,4))
+## Missing Values
+nulls<-sapply(df, function(x) sum(is.na (x)))/dim(df)[1]
+nulls<-nulls[order(desc(nulls))]
+names(nulls)
+par(mfrow=c(1,1))
+barplot(nulls,las=2,cex.names=.7, cex.axis=0.7)
+par(mar=c(1,1,1,1)) # Reset Sizes
+```
+
+```{r null plot main cols hist, echo=FALSE, fig.width=8, fig.height=5}
+par(mfrow=c(2,2))
+for (cc in c('Air.Temperature.ÂºC.','Highest.Wave.Period.s.','Mean.comming.from.Direc..at.Waves.Peak.grados.','Maximum.Waves.Height.m.')){
+  x<-drop_na(df[cc])[[1]]
+  hist(x,main=paste('Histogram',cc))
+}
+```
+
+
+```{r null plot main cols ts, echo=FALSE, fig.width=8, fig.height=5}
+## Main missing columns
+res<-data.frame()
+par(mfrow=c(2,2))
+for (cc in c('Air.Temperature.ÂºC.','Highest.Wave.Period.s.','Mean.comming.from.Direc..at.Waves.Peak.grados.','Maximum.Waves.Height.m.')){
+  x<-drop_na(df[cc])[[1]]
+  plot(df$Date..GMT.,df[[cc]],main=paste('Time series',cc))
+  
+  # Create Stats Matrix
+  if (dim(res)[1]==0){
+  res<-data.frame(name=cc, mean=mean(x), sd=sd(x), skw=skewness(x), kurt=kurtosis(x))
+  } else {
+  res<-rbind(res, data.frame(name=cc, mean=mean(x), sd=sd(x), skw=skewness(x), kurt=kurtosis(x)))
+  }
+  
+}
+```
+
+``` {r null df, echo=FALSE}
+res %>% as_tibble()
+```
+
+After exploring the, probabilistic distributions one could argue most of them are right skewed except for the Air Temperature which is the one which presenst a closets similarity to a normal distribution (Skewness= 0.17, Kurt = -0.44). But given this is a time series, it might be possible to fit it to a trend function, so let's explore them from a time series perspective.
+
+## Air Temperature
+The variable seems to be following a cyclic pattern, which would make sense, the air temperature would be expected to be higher during the summer periods and lower during the winter, plot below shows how we have the trend points for the series, we have the initial increment from June 2020, then around October it starts to show a downward trend and after May it starts to pick up again.
+
+``` {r air temp plot df, echo=FALSE}
+par(mfrow=c(1,1))
+## Air Temperature
+cc<-'Air.Temperature.ÂºC.'
+x<-drop_na(df[cc])[[1]]
+plot(df$Date..GMT.,df[[cc]],main=paste('Time series',cc))
+```
+
+
+``` {r air temp adjust curve, echo=FALSE,fig.width=8, fig.height=5}
+# Adjusted Curve
+# Trend 1
+t0 = '2020-06-01 00:00:00'
+t0<-as.POSIXct(t0,format="%Y-%m-%d %H:%M:%S")
+trend1 = ifelse(df$Date..GMT.>=t0,1,0)
+
+# Trend 2
+t0 = '2020-10-01 00:00:00'
+trend2 = ifelse(df$Date..GMT.>=t0,1,0)
+
+airtemp<-df[cc][[1]]
+airtemp<-as_tibble(airtemp) %>% mutate(
+  trend = seq(1,length(airtemp),1),
+  trend1_sq=cumsum(trend1)**2,
+  trend2_sq=cumsum(trend2)**2)
+
+train <- drop_na(airtemp)
+
+model<-lm(value~trend+trend1_sq+trend2_sq,data=train)
+
+airtemp<-airtemp%>%mutate(yh=predict(model,newdata = airtemp),ynew = ifelse(is.na(value),yh,value)) 
+airtemp %>% ggplot()+ 
+  geom_point(aes(trend, value)) + 
+  geom_line(aes(trend,yh),color='red')+
+  labs(title="Adjusted Time series plot")
+```
+
+
+``` {r air temp plot final result, echo=FALSE,fig.width=8, fig.height=5}
+# # We will use this curve to fill missing values
+df[cc]<-airtemp$ynew
+par(mfrow=c(1,1))
+plot(df$Date..GMT.,df[[cc]],main=paste('Time series for Air Temperature after missing values filled'))
+```
+
+## Other three columns 
+The variables Highest Wave Period(s), Mean comming-from Direc. at Waves Peak(grados) and Maximum Waves Height(m) do not present any obvious overarching trend, therefore we will use the mean value to fill the missing values.
+
+
+``` {r other three columns, echo=FALSE,fig.width=8, fig.height=5}
+# we will use the mean value to fill the missing values.
+for (cc in c('Highest.Wave.Period.s.','Mean.comming.from.Direc..at.Waves.Peak.grados.','Maximum.Waves.Height.m.')){
+  x<-drop_na(df[cc])[[1]]
+  df[cc][is.na(df[cc])]<-mean(x)
+}
+
+```
+
+## Remaining missing values
+Given they represent less than 1% of the total values, we will use the mean value for all of them and drop all the records for the missing values of **"Significant Wave Height(m)"**, given this is our target value.
+
+
+``` {r remainingmissingvalues, echo=FALSE,fig.width=8, fig.height=5}
+par(mar=c(15,4,4,4))
+## Missing Values
+nulls<-sapply(df, function(x) sum(is.na (x)))/dim(df)[1]
+nulls<-nulls[order(desc(nulls))]
+barplot(nulls,las=2,cex.names=.7, cex.axis=0.7)
+par(mar=c(1,1,1,1)) # Reset Sizes
+
+
+## Remaining missing values
+
+missing_val_names<-names(nulls[nulls>0])
+target_var <-"Significant.Wave.Height.m."
+missing_val_names<-missing_val_names[missing_val_names!=target_var]
+
+for (cc in missing_val_names){
+  x<-drop_na(df[cc])[[1]]
+  df[cc][is.na(df[cc])]<-mean(x)
+}
+
+# Drop missing Significant Wave Heights records
+df<-drop_na(df)
+
+```
+
+
+# Analysing target variable
+When plotting the variable it is quite obvious it is a time series which presents several levels of seasonality, the usual levels of seasonality experience by the sea state can be found in several nautical bibliography books, but as a rule of thumb waves in the ocean present at the very least the following levels of seasonality:
+- Every 12hrs
+- Daily (Mon to Sun)
+- Moon Cycles (every 28 days)
+- YearSeasons, which we will model with the per month indicator
+
+If we had longer tailed data spanning over several years we might be able to identify further seasonal information periods, but given our dataset spans for the lenght of 1 year, we will focus on the most frequently identifiable seasonal events a wave time series might experience over the course of a year.
+
+Which means we will add those levels of information to our dataset to highlight those events
+
+
+``` {r wave height lagged plots, echo=FALSE,fig.width=8, fig.height=5}
+# Analysing target variable
+a<-df[target_var] %>% head(72) 
+alag12<-lag(df[target_var],12) %>% head(72)
+alag24<-lag(df[target_var],24) %>% head(72)
+
+data.frame(x=seq(1,72,1),WaveHeight=a[[1]],Lag12=alag12[[1]],Lag24=alag24[[1]]) %>%
+  melt(id=c("x")) %>% ggplot(aes(x=x,y=value,color=variable)) +
+  geom_line()+
+  labs(title="Lagged Time series plot")
+```
+
+``` {r seasonality and ohe, echo=FALSE,fig.width=8, fig.height=5}
+# Adding seasonality indicators
+a<-df %>% mutate(
+  Ind12hrs = as_factor(seq(0, dim(df)[1] - 1 ) - floor(seq(0, dim(df)[1] - 1 )/12) * 12),
+  Weekday = as_factor(strftime(Date..GMT.,"%a")),
+  MoonCycle = as_factor(seq(0, dim(df)[1] - 1 ) - floor(seq(0, dim(df)[1] - 1 )/672) * 672),
+  Monthly = as_factor(strftime(Date..GMT.,"%b")),
+  ) %>% select(Ind12hrs, Weekday, MoonCycle, Monthly)
+
+
+library(mltools, include.only = 'one_hot')
+# One hot encoding 
+b<-one_hot(as.data.table(a)) %>% 
+  select(-c("Monthly_Jun","MoonCycle_0","Weekday_Mon","Ind12hrs_0"))
+
+df<-bind_cols(df,b) %>%  select(-c("Source.of.data","Source.of.data.1","Source.of.data.2","Source.of.data.3"))
+```
+
+
+# Model selection and cross validation
+From a purest perspective, this is a time series forecasting model, whereby we aim to predict the wave height based on some seasonality and trend, however, what we've also got are some measurements of the sea state: Water Temperature, Salinity, Wind speed, Wave direction, which we could use to help improve our model and move away from a time series forecasting model towards a multivariate regression model.
+
+Given we've got no baseline for our model we will build a baseline model which will consist mainly of the average:
+$$\hat{y} \approx \bar{y}$$
+And use it as the baseline to beat.
+
+As output measures to consider model performance we will use two metrics:
+- Root mean square error
+$$\text{RMSE} = \sqrt{\frac{\sum_{i=1}^{n}e_i^2}{n}}$$
+- Mean absolute error
+$$\text{MAE} = \frac{\sum_{i=1}^{n}|e_i|}{n}$$
+
+``` {r msel and cross val, echo=FALSE}
+# Model selection and cross validation
+x<-df %>% select(-c("Significant.Wave.Height.m.","Maximum.Waves.Height.m.","Date..GMT."))
+y<-df %>% select("Significant.Wave.Height.m.")
+
+
+trctrl <- trainControl(method = "cv", number = 10, savePredictions=TRUE)
+
+x_baseline<-x %>% mutate(intercept=seq(1,1,length.out=dim(x)[1])) %>% select(intercept)
+
+baseline_nb_fit <- train(x=x_baseline, y=y$Significant.Wave.Height.m., method = "lm", trControl=trctrl, 
+                         tuneLength = 0, tuneGrid  = expand.grid(intercept = FALSE))
+
+lm_nb_fit <- train(x=x, y=y$Significant.Wave.Height.m., method = "lm", trControl=trctrl, tuneLength = 0, standardize = FALSE)
+
+ridge_nb_fit <- train(
+  x=x, y=y$Significant.Wave.Height.m., method = "glmnet", trControl=trctrl, 
+  tuneLength = 0, standardize = FALSE, tuneGrid = expand.grid(alpha = 0,lambda = seq(0,5,0.5)))
+
+# Almost 40mins to Train this random forest
+rf_nb_fit <- train(x=x, y=y$Significant.Wave.Height.m., method = "rf", ntree = 100, 
+                   trControl=trctrl, tuneLength = 0,
+                   tuneGrid  = expand.grid(mtry = seq(20, 50, 5)))
+```
+
+
+## Results
+Our tope performer model seems to be the random forest regressor which outperforms all the other considered models on the cross validation test we used, and improves our baseline average model by reducing the RMSE by 74% and the MAE  in 76% in comparison.
+
+
+``` {r cross val res, echo=FALSE}
+res<-rbind(
+  baseline_nb_fit$results[order(baseline_nb_fit$results$RMSE),] %>% head(1) %>% select(RMSE, MAE) %>% mutate(Model="Baseline"),
+  lm_nb_fit$results[order(lm_nb_fit$results$RMSE),] %>% head(1) %>% select(RMSE, MAE) %>% mutate(Model="LinearRegression"),
+  ridge_nb_fit$results[order(ridge_nb_fit$results$RMSE),] %>% head(1) %>% select(RMSE, MAE) %>% mutate(Model="Ridge"),
+  rf_nb_fit$results[order(rf_nb_fit$results$RMSE),] %>% head(1) %>% select(RMSE, MAE) %>% mutate(Model="RandomForest")
+) %>% select(Model, RMSE, MAE)
+
+res[order(res$RMSE),]
+```
+
+
+### Results Critique
+However how good is our model, should we pursue alternatives? A good way to do this, would be by analysing the residuals out of our fitted model, in this case the top performer RandomForestRegressor, the summary performance parameters out of our cross validated samples are:
+
+- RMSE: 0.1370972 m
+- MAE: 0.09823503 m
+
+Which can be interpreted as the expected model standard deviation against unseen data is of 0.137 m (or 14cm). 
+
+However how good is the achieved standard deviation? If we consider the mean expected wave is of 0.7667m we are looking at a coeficient of variation of $\text{cv} = \text{std}\,/\,\text{mean} = 0.18$, which means our standard deviation has the size of 18% our mean value, which is not despicable, and makes our confidence interval for the expected value of the significant wave height to oscillate $ \hat{y} +/-1.96 \text{RMSE}$
+
+
+``` {r cross val res, echo=FALSE}
+res[order(res$RMSE),] %>% head(1)
+
+# Residuals
+ypred<-predict(rf_nb_fit,newdata = x)
+residuals_swh <- y$Significant.Wave.Height.m. - ypred
+
+
+```
+
+
+At this point we've got several options to consider:
+- Optimizing our selected ML algorithm, we could use grid search for hyperparameter tunning of the model in order to make it more robust against unseen data.
+- Changing the probelm solving approach, move from a regressor to classifier.
+- Conduct feature selection and dimenstionality reduction
+- Consider variables interaction
+
+However, there is a clear factor on this particular data we are analysing which we've clearly disregarded and it is the fact this is a time series, and time series usually present the following property **autocorrelation**, which could be loosely translated as *is the future value of my series influenced by the value which had yesterday?*, for a casual description of the concept we could refer to the wikipedia definition https://en.wikipedia.org/wiki/Autocorrelation, however there is plenty of literature in the topic.
+
+If we were to plot the autocorrelation plot for our residuals, we could see the chart below, which shows a strong autocorrelation between the current value and its past values, which would make sense, one might argue the current sea state could be in part defined by the previous state and some additional external variables.
+
+``` {r acf, echo=FALSE,fig.width=8, fig.height=5}
+# Autocorrelation
+acf(residuals_swh,lag.max=30)
+```
+
+
+However if we were going to shift our approach from regression to time series forecasting, we would need to change several of the approached taken in our model, and given this has not been addressed as part of the course modules we will provide a general overview of the problem and how we could get a glance of the effect of autocorrelation in our current model.
+
+If we were to build an autoregressive model, and there is plenty of literature in the topic, where we could use simple naive, naive seasonal methods, down to data smoothers such as Exponential or Smoothing splines, and for much more advanced complex problem ARMA, ARIMA and SARIMAX models, which have their own fine tuning requriements.
+
+And from a scoring perspective, which is what will affect the most to our current approach, we will need to change the cross validation approach and use time series cross validation, which means we will train our model with the first n sequential data points to predict the from n + 1 to n + h next data points, where h is our forecast horizon, **sequential** being the key here, given we will try to predict the future using the past data points, if we were to use the future to predict the some of its future values we will get an overestimation of the model's performance.
+
+For our example on what autocorrelation could be applied to our model, we will assume h = 1, meaning our target is to predict the next period t + 1  with the information up to t, plus the sea state information at t + 1 (which are all the columns we know the values for at t + 1).
+
+The simplest way to do this, would be to shift our Wave height column 1 time period and use the past value to predict the next, below we've added the the column SWH_tp as the previous value for the Significant wave height.
+
+
+``` {r lagged series, echo=FALSE,fig.width=8, fig.height=5}
+# Adding Autocorrelation to our model
+
+swhlag1<-lag(y$Significant.Wave.Height.m., 1)
+swhlag1<-ifelse(is.na(swhlag1),0,swhlag1)
+
+# Plot Series and Lagged Series
+data.frame(x=seq(1,72,1),WaveHeight=head(y$Significant.Wave.Height.m.,72),
+           swhlag1=head(swhlag1,72)) %>%
+  melt(id=c("x")) %>% ggplot(aes(x=x,y=value,color=variable)) +
+  geom_line()+
+  labs(title="Lagged Time series plot")
+
+```
+And if now we retrain the model and plot the autocorrelation function once more, we can see how it has dissapeared in its entirety meaning, we've modelled the effect of autocorrelation in our model.
+
+``` {r final model retrained and acf, echo=FALSE,fig.width=8, fig.height=5}
+
+# Retrain Model
+x_with_acf<-x %>% mutate(swhlag1=swhlag1)
+
+
+trctrl_modelfinal <- trainControl(method = "cv", number = 10, savePredictions=TRUE)
+
+# Almost 10 mins to Train this random forest
+modelfinal <- train(x=x_with_acf, y=y$Significant.Wave.Height.m., 
+                    method = "rf", ntree = 100, tuneLength = 0,
+                    trControl = trctrl_modelfinal,
+                   tuneGrid  = expand.grid(mtry = 50))
+
+
+ypred<-predict(modelfinal, newdata = x_with_acf)
+residuals_swh <- y$Significant.Wave.Height.m. - ypred
+
+# Autocorrelation
+acf(residuals_swh,lag.max=30)
+```
+
+And if we were to measure the RMSE against unseen data we would obtain the following output measures:
+- RMSE: 0.09722259m (previous 0.1370972 m)
+- MAE: 0.06794571m (previous 0.09823503 m)
+
+We've reduced our expected standard deviation against unseen data from 0.137m down to 0.097m (29% drop), and now the coefficient of variation is of 0.127, which means our standard deviation is about 13% of our variable mean, showing how we could improve our regressor and probably try also more time series oriented models when comparing performance.
+
+``` {r final model retrained results, echo=FALSE}
+modelfinal$results
+```
+
+
+
+Explaning considerations on what needs to be considered to build a robust time series model goes beyond the scope of this paper, but all the general rules for time series forecasting apply such as, guaranteeing time series continuity, identifying outlier, defining missing values and outliers strategy, normalizing our series and making it stationary, etc...
+
+
+# Conclusion
+We've developed a regression model to predict the Significant Wave Height (m) using a set of input variables which measure the sea state at any given time period, and entertained the idea of swicthing to a time series model which could describe the dynamics of our data much better.
+
+It is clear that in order to decide what to do next we should consider our intent behind making those predictions, is this data that might be used to make safety recommendations to the population?, are we after defyning the extreme sea state for water infrastructure development? or will this be used by our nautical fleet when deciding to go fishing or sailing?
+
+There is a wide range or applications we could be using this data for, and depending on the customer needs we might need to build one kind of model or another, and probably adjust accordingly the success measure, but one very crucial factor to define would be our prediction time horizon, this is, how many periods h into the future our wave will need to be predicted for. 
+
+One of the biggest weaknesses of our developed model are the predictors used in our input matrix, given these are measured sea conditions **at the time of prediction**, this means we will probably not have this data available at the time of forecasting, meaning some of our features will have an associated degree of uncertainty at the time of forecasting if we are going to be using them, which builds the case even further towards switching into a time series forecasting model.
+
+We've written this paper as a demonstration on how we could use some of the learned techniques on the DataScience course over EDX could be used for, but as previously mentioned if our aim was to build a robust prediction tool we will need to take a complete different approach by which we follow a twofold approach:
+- Listen to the voice of the customer (aspect which can't be performed here given this is a technical paper)
+- Build a tool which utilizes the most reliable and useful data at reach at the point of prediction.
+
+
+
