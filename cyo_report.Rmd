@@ -5,12 +5,15 @@ date: "24/06/2021"
 output: pdf_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+
+```{r global-options, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
+                      echo=FALSE, warning=FALSE, message=FALSE)
 ```
 
 # Introduction
 Wave height forecasting plays a crucial role on supporting a country coastal development. Being able to correctly define your coastal conditions allows to correctly define the design parameters to create coastal protection structures such as:
+
 - Ports & Harbours
 - Jetty walls
 - Breakwaters
@@ -19,7 +22,7 @@ And even design some of the most complex and spectacular cities known to man, su
 
 The dataset considered for this analysis contains ocean wave information about Valencia, a coastal city in the east of Spain. The Buoy is placed on the Mediterratenan Sea, and the data can be extracted from http://www.puertos.es/en-us/oceanografia/Pages/portus.aspx.
 
-On this project we will conduct an Exploratory Data Analysis (EDA) on the Coastal Data for the Valencia region and build a robust forecasting model on expected Significant ($H_s$) and Maximum ($H_p$) wave height, aiming to provide reliable forecasted values for the significant wave height.
+On this project we will conduct an Exploratory Data Analysis (EDA) on the Coastal Data for the Valencia region and build a robust forecasting model on expected Significant ($H_s$), aiming to provide reliable forecasted values for the significant wave height.
 
 # Variables
 The full description on the features and parameters can be found in the attached file "OPPE_Description.pdf", but given this is supplied by the Public Gov Organism State Ports and it is only supplied in Spanish, we will provide the following variables description,
@@ -49,7 +52,7 @@ Water Temperature|Instantaneous|
 - Scalar parameters of zero cross and espectral.
     - Significant Wave Height(m): the average wave height, from trough to crest, of the highest one-third of the waves. This is used to represent the wave height an trained observer will appreciate by simply looking where the wave is crossing (not from the coast).
     - Mean Period Tm02(s): Mean period (as an inverse of the wave length) of the measured waves, usually referred to as $T_m$
-    - Peak Period(s): Period of the wave group with more energy, usually defined as $T_p$, when the more regular the waves are, the closer the $T_p$ is to the $T_m$, however $T_p$ is usually larger than $T_m$
+    - Peak Period(s): Period of the wave group with more energy, usually defined as $T_p$, the more regular the waves are, the closer the $T_p$ is to the $T_m$, however $T_p$ is usually larger than $T_m$
     - Maximum Waves Height(m): Max Wave Height measured
     - Highest Wave Period(s): 
 - Directional parameters
@@ -59,16 +62,18 @@ Water Temperature|Instantaneous|
     
 ### Meteorology
 Measured 3m over the water surface
-- Atmospheric Pressure(hpa)                     
-- Air Temperature(ºC)                             
-- Wind Speed(m/s)                                 
+
+- Atmospheric Pressure(hpa)
+- Air Temperature(ºC)
+- Wind Speed(m/s)
 - Wind coming-from Direction(0=N,90=E)  , mean direction of propagation
 
 ### Oceanography 
 Measured 3m under the water surface
-- Sea Temperature(ºC)                             
-- Salinity(Practical Salinity Units, psu), salt concentration (Sodium and Chlorure) in sea water.                           
-- Currents Mean Speed(cm/s), mean speed of the water currents                      
+
+- Sea Temperature(ºC)
+- Salinity(Practical Salinity Units, psu), salt concentration (Sodium and Chlorure) in sea water.
+- Currents Mean Speed(cm/s), mean speed of the water currents
 - Currents propag. Direction(0=N,90=E), mean direction of propagation
 
 ## Valencia Buoy information
@@ -114,8 +119,12 @@ print(summary(df))
 
 # Missing Values
 Below we can see the % of null values present in our dataset
+
 - Air Temperature(ºC) has 60.02% of its values missing in the considered time period
+
+
 The Highest Wave records present the 55% of their records missing for the considered time period
+
 - Highest Wave Period(s)
 - Mean comming-from Direc. at Waves Peak(grados)
 - Maximum Waves Height(m) 
@@ -259,6 +268,7 @@ df<-drop_na(df)
 
 # Analysing target variable
 When plotting the variable it is quite obvious it is a time series which presents several levels of seasonality, the usual levels of seasonality experience by the sea state can be found in several nautical bibliography books, but as a rule of thumb waves in the ocean present at the very least the following levels of seasonality:
+
 - Every 12hrs
 - Daily (Mon to Sun)
 - Moon Cycles (every 28 days)
@@ -305,9 +315,8 @@ From a purest perspective, this is a time series forecasting model, whereby we a
 
 Given we've got no baseline for our model we will build a baseline model which will consist mainly of the average:
 $$\hat{y} \approx \bar{y}$$
-And use it as the baseline to beat.
+And use it as the baseline to beat. As output measures to consider model performance we will use two metrics:
 
-As output measures to consider model performance we will use two metrics:
 - Root mean square error
 $$\text{RMSE} = \sqrt{\frac{\sum_{i=1}^{n}e_i^2}{n}}$$
 - Mean absolute error
@@ -340,7 +349,7 @@ rf_nb_fit <- train(x=x, y=y$Significant.Wave.Height.m., method = "rf", ntree = 1
 
 
 ## Results
-Our tope performer model seems to be the random forest regressor which outperforms all the other considered models on the cross validation test we used, and improves our baseline average model by reducing the RMSE by 74% and the MAE  in 76% in comparison.
+Our top performer model seems to be the random forest regressor which outperforms all the other considered models on the cross validation test we used, and improves our baseline average model by reducing the RMSE by 70% and the MAE  in 71% in comparison.
 
 
 ``` {r cross val res, echo=FALSE}
@@ -363,10 +372,10 @@ However how good is our model, should we pursue alternatives? A good way to do t
 
 Which can be interpreted as the expected model standard deviation against unseen data is of 0.137 m (or 14cm). 
 
-However how good is the achieved standard deviation? If we consider the mean expected wave is of 0.7667m we are looking at a coeficient of variation of $\text{cv} = \text{std}\,/\,\text{mean} = 0.18$, which means our standard deviation has the size of 18% our mean value, which is not despicable, and makes our confidence interval for the expected value of the significant wave height to oscillate $ \hat{y} +/-1.96 \text{RMSE}$
+However how good is the achieved standard deviation? If we consider the mean expected wave is of 0.7667m we are looking at a coeficient of variation of $\text{cv} = \text{std}\,/\,\text{mean} = 0.18$, which means our standard deviation has the size of 18% our mean value, which is not despicable, and makes our confidence interval for the expected value of the significant wave height to oscillate $\hat{y} +/-1.96 \text{RMSE}$
 
 
-``` {r cross val res, echo=FALSE}
+``` {r cross val res new, echo=FALSE}
 res[order(res$RMSE),] %>% head(1)
 
 # Residuals
@@ -378,6 +387,7 @@ residuals_swh <- y$Significant.Wave.Height.m. - ypred
 
 
 At this point we've got several options to consider:
+
 - Optimizing our selected ML algorithm, we could use grid search for hyperparameter tunning of the model in order to make it more robust against unseen data.
 - Changing the probelm solving approach, move from a regressor to classifier.
 - Conduct feature selection and dimenstionality reduction
@@ -443,6 +453,7 @@ acf(residuals_swh,lag.max=30)
 ```
 
 And if we were to measure the RMSE against unseen data we would obtain the following output measures:
+
 - RMSE: 0.09722259m (previous 0.1370972 m)
 - MAE: 0.06794571m (previous 0.09823503 m)
 
@@ -467,6 +478,7 @@ There is a wide range or applications we could be using this data for, and depen
 One of the biggest weaknesses of our developed model are the predictors used in our input matrix, given these are measured sea conditions **at the time of prediction**, this means we will probably not have this data available at the time of forecasting, meaning some of our features will have an associated degree of uncertainty at the time of forecasting if we are going to be using them, which builds the case even further towards switching into a time series forecasting model.
 
 We've written this paper as a demonstration on how we could use some of the learned techniques on the DataScience course over EDX could be used for, but as previously mentioned if our aim was to build a robust prediction tool we will need to take a complete different approach by which we follow a twofold approach:
+
 - Listen to the voice of the customer (aspect which can't be performed here given this is a technical paper)
 - Build a tool which utilizes the most reliable and useful data at reach at the point of prediction.
 

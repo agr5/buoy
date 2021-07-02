@@ -1,4 +1,6 @@
 # Change working dir
+# Or set it to the dir where the files will be sitting, 
+# specially the data file
 setwd("C:/Users/alber/projects/capstone/cyo")
 
 
